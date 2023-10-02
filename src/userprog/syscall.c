@@ -4,24 +4,35 @@
 #include <stdio.h>
 #include <syscall-nr.h>
 #include <string.h>
-//#include "devices/shutdown.h"
-//#include "devices/input.h"
+#include "devices/shutdown.h"
+#include "devices/input.h"
 #include "filesys/filesys.h"
 #include "filesys/file.h"
 #include "filesys/inode.h"
 #include "filesys/directory.h"
-//#include "threads/palloc.h"
-//#include "threads/malloc.h"
-//#include "threads/interrupt.h"
-//#include "threads/thread.h"
+#include "threads/palloc.h"
+#include "threads/malloc.h"
+#include "threads/interrupt.h"
+#include "threads/thread.h"
 #include "threads/vaddr.h"
-//#include "threads/synch.h"
+#include "threads/synch.h"
 #include "threads/init.h"
-//#include "threads/thread.h"
-//#include "lib/kernel/list.h"
-//#include "lib/user/syscall.h"
+#include "threads/thread.h"
+#include "lib/kernel/list.h"
+#include "lib/user/syscall.h"
 static void syscall_handler (struct intr_frame *);
 bool is_ptr_valid(const void *user_ptr);
+struct lock filesys_lock;
+struct file_descriptor{
+  int fd_num;
+  tid_t owner;
+  struct file *file_struct;
+  struct list_elem elem;
+};
+struct file_descriptor * retrieve_file(int fd);
+
+
+
 void
 syscall_init (void) 
 {
@@ -121,6 +132,29 @@ syscall_handler (struct intr_frame *f)
   //thread_exit (); reserved for exit sys calls only now?
 }
 
+
+int sys_filesize(int fd_num)
+{
+  struct file_descriptor * file_desc;
+  int returnval = -1;
+
+  //printf("sys_filesize: retrieving file descriptor: %d\n", fd_num);
+
+  // using the file filesystem => acquire lock
+  lock_acquire(&filesys_lock);
+
+  file_desc = retrieve_file(fd_num);
+
+  if (file_desc != NULL)
+  {
+    //printf("sys_filesize: retrieved file descriptor: %d\n", file_desc->fd_num);
+    returnval = file_length(file_desc->file_struct);
+  }
+  lock_release(&filesys_lock);
+  return returnval;
+}
+
+
 /*Terminates Pintos by calling shutdown_power_off() (declared in threads/init.h). This should be seldom used, because you lose some information about possible deadlock situations, etc.*/
 void syscall_halt(){
 	shutdown_power_off();
@@ -141,8 +175,52 @@ void syscall_exit(int exit_num){
 /*
 Runs the executable whose name is given in cmd_line, passing any given arguments, and returns the new process's program id (pid). Must return pid -1, which otherwise should not be a valid pid, if the program cannot load or run for any reason. Thus, the parent process cannot return from the exec until it knows whether the child process successfully loaded its executable. You must use appropriate synchronization to ensure this.
 */
-pid_t syscall_exec(const char *cmd_line){
+int syscall_exec(const char *cmdline){
+	char * cmdline_cp;
+  char * ptr;
+  char * file_name;
+  struct file * f;
+  int thread_id;
+  
+  //parse file name
+  cmdline_cp = malloc(strlen(cmdline)+1);
+  strlcpy(cmdline_cp, cmdline, strlen(cmdline)+1);
+  file_name = strtok_r(cmdline_cp, " ", &ptr);
+  
+  
+  //run executable (create new process)
+   lock_acquire(&filesys_lock);
 
+  // try and open file name
+  f = filesys_open(file_name);
+
+  // f will be null if file not found in file system
+  if (f == NULL){
+    // nothing to do here exec fails, release lock and return -1
+    printf("SYSCALL: sys_exec: filesys_open failed\n");
+    lock_release(&filesys_lock);
+    return (pid_t)-1;
+  } else {
+    // file exists, we can close file and call our implemented process_execute() to run the executable
+    file_close(f);
+    lock_release(&filesys_lock);
+
+    // wait for child process to load successfully, otherwise return -1
+    thread_current()->child_load = 0;
+    thread_id = process_execute(cmdline);
+    lock_acquire(&thread_current()->child_lock);
+    printf("SYSCALL: sys_exec: waiting until child_load != 0\n");
+    while(thread_current()->child_load == 0)
+      cond_wait(&thread_current()->child_condition, &thread_current()->child_lock);
+    printf("SYSCALL: sys_exec: child_load != 0\n");
+    if(thread_current()->child_load == -1) // load failed no process id to return
+     {
+       thread_id = -1;
+       printf("SYSCALL: sys_exec: child_load failed\n");
+     }
+    lock_release(&thread_current()->child_lock);
+    return thread_id;
+  }
 }
 
 /*Waits for a child process pid and retrieves the child's exit status.
@@ -151,7 +229,7 @@ If pid is still alive, waits until it terminates. Then, returns the status that 
 Longer description on the stanford site
 */ 
 
-int syscall_wait(pid_t pid){
+int syscall_wait(int pid){
 
 }
 
@@ -192,7 +270,8 @@ Writing past end-of-file would normally extend the file, but file growth is not 
 
 Fd 1 writes to the console. Your code to write to the console should write all of buffer in one call to putbuf(), at least as long as size is not bigger than a few hundred bytes. (It is reasonable to break up larger buffers.) Otherwise, lines of text output by different processes may end up interleaved on the console, confusing both human readers and our grading scripts. */
 int syscall_write(int fd, void *buffer, unsigned size){
-
+	struct file_descriptor *fd_struct;
+  int bytes_written = 0;
 }
 
 /* Changes the next byte to be read or written in open file fd to position, expressed in bytes from the beginning of the file. (Thus, a position of 0 is the file's start.)
@@ -203,12 +282,24 @@ void syscall_seek(int fd, unsigned position){
 
 /* Returns the position of the next byte to be read or written in open file fd, expressed in bytes from the beginning of the file. */
 unsigned syscall_tell(int fd){
-
+	struct file_descriptor *fd_struct;
+  int bytes = 0;
+  lock_acquire(&filesys_lock);
+  fd_struct = retrieve_file(fd);
+  if(fd_struct != NULL)
+    bytes = file_tell(fd_struct->file_struct);
+  lock_release(&filesys_lock);
+  return bytes;
 }
 
 /* Closes file descriptor fd. Exiting or terminating a process implicitly closes all its open file descriptors, as if by calling this function for each one. */ 
 void syscall_close(int fd){
-
+	struct file_descriptor *fd_struct;
+  lock_acquire(&filesys_lock);
+  fd_struct = retrieve_file(fd);
+  if(fd_struct != NULL && fd_struct->owner == thread_current()->tid)
+    close_extra_files(fd);
+  lock_release(&filesys_lock);
 }
 
 
@@ -222,3 +313,50 @@ bool is_ptr_valid(const void *user_ptr)
   }
   return true;
 }
+
+
+
+
+
+struct file_descriptor * retrieve_file(int fd){
+/*  struct list_elem *list_element;
+  struct file_descriptor *fd_struct;
+  for(list_element = list_head(&thread_current()->open_files); list_element != list_tail(&thread_current()->open_files);
+  list_element = list_next(list_element)){
+    fd_struct = list_entry (list_element, struct file_descriptor, elem);
+    if (fd_struct->fd_num == fd)
+      return fd_struct;
+  }
+  //This is done for the tail
+  fd_struct = list_entry (list_element, struct file_descriptor, elem);
+  if (fd_struct->fd_num == fd)
+    return fd_struct;
+*/
+  return NULL;
+}
+
+void close_extra_files(int fd_num)
+{
+  struct list_elem *elem;
+  struct list_elem *temp;
+  struct file_descriptor *file_desc;
+/*
+  elem = list_head (&(thread_current()->open_files));
+  while ((elem = list_next (elem)) != list_tail (&(thread_current()
+      ->open_files)))
+  {
+    temp = list_prev(elem);
+    file_desc = list_entry(elem, struct file_descriptor, elem);
+    if (file_desc->fd_num == fd_num)
+    {
+      list_remove(elem);
+      file_close(file_desc->file_struct);
+      free(file_desc);
+      return;
+    }
+    elem = temp;
+  }
+*/
+  return;
+}
+
