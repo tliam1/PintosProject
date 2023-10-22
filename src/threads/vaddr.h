@@ -20,6 +20,9 @@
 #define PGSIZE  (1 << PGBITS)              /* Bytes in a page. */
 #define PGMASK  BITMASK(PGSHIFT, PGBITS)   /* Page offset bits (0:12). */
 
+/* Check pointers provided by a user program */
+bool is_valid_ptr(const void *);
+
 /* Offset within a page. */
 static inline unsigned pg_ofs (const void *va) {
   return (uintptr_t) va & PGMASK;
@@ -39,7 +42,7 @@ static inline void *pg_round_up (const void *va) {
 static inline void *pg_round_down (const void *va) {
   return (void *) ((uintptr_t) va & ~PGMASK);
 }
-
+
 /* Base address of the 1:1 physical-to-virtual mapping.  Physical
    memory is mapped starting at this virtual address.  Thus,
    physical address 0 is accessible at PHYS_BASE, physical
