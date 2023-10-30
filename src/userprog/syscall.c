@@ -21,7 +21,7 @@
 #include "lib/kernel/list.h"
 #include "lib/user/syscall.h"
 static void syscall_handler (struct intr_frame *);
-bool is_ptr_valid(const void *user_ptr);
+bool is_valid_ptr(const void *user_ptr);
 struct lock filesys_lock;
 struct file_descriptor{
   int fd_num;
@@ -79,7 +79,7 @@ syscall_handler (struct intr_frame *f)
         syscall_exit(-1);
 
       // pointers are valid, call sys_exec and save result to eax for the interrupt frame
-      f->eax = (uint32_t)syscall_exit((const char *)*(esp + 1));
+      f->eax = (uint32_t)syscall_exec((const char *)*(esp + 1));
 			break;
 		}
 		case SYS_WAIT:
@@ -256,13 +256,43 @@ void syscall_halt(){
 /* Terminates the current user program, returning status to the kernel. If the process's parent waits for it (see below), this is the status that will be returned. Conventionally, a status of 0 indicates success and nonzero values indicate errors.
 */
 void syscall_exit(int exit_num){
-	 if(exit_num != 0){
-	 	printf("SYS_EXIT: ERROR \n");
-	 }
-	 else{
-	 	printf("SYS_EXIT: SUCCESS \n");
-	 }
-	 thread_exit ();
+	struct child_status *child_status;
+  struct thread *curr = thread_current();
+  struct thread *parent_thread = thread_get_by_id(curr->parent_tid);
+
+  printf ("%s: exit(%d)\n", curr->name, exit_num);
+
+  if (parent_thread != NULL)
+   {
+     // iterate through parent's child list to find current thread's entry
+     // to update its status
+     struct list_elem *elem = list_head(&parent_thread->children);
+
+     //first check the head
+     child_status = list_entry(elem, struct child_status, elem_child_status);
+     if (child_status->child_tid == curr->tid)
+     {
+       lock_acquire(&parent_thread->child_lock);
+       child_status->exited = true;
+       child_status->child_exit_status = exit_num;
+       lock_release(&parent_thread->child_lock);
+     }
+
+     //and check the whole list too
+     while((elem = list_next(elem)) != list_tail(&parent_thread->children))
+     {
+       child_status = list_entry(elem, struct child_status, elem_child_status);
+       if (child_status->child_tid == curr->tid)
+       {
+         lock_acquire(&parent_thread->child_lock);
+         child_status->exited = true;
+         child_status->child_exit_status = exit_num;
+         lock_release(&parent_thread->child_lock);
+       }
+     }
+   }
+
+  thread_exit();
 }
 
 /*
@@ -349,7 +379,7 @@ int syscall_open(char * file){
   lock_acquire(&filesys_lock);
 
   // open the file
-  struct file * new_file_struct = filesys_open(file_name);
+  struct file * new_file_struct = filesys_open(file);
 
   // file will be null if file not found in file system
   if (new_file_struct==NULL){
@@ -374,26 +404,6 @@ int syscall_open(char * file){
   return new_thread_file->fd_num;
 }
 
-/* Returns the size, in bytes, of the file open as fd. */
-int syscall_filesize(int fd){
-	struct file_descriptor * file_desc;
-  int returnval = -1;
-
-  //printf("sys_filesize: retrieving file descriptor: %d\n", fd_num);
-
-  // using the file filesystem => acquire lock
-  lock_acquire(&filesys_lock);
-
-  file_desc = retrieve_file(fd_num);
-
-  if (file_desc != NULL)
-  {
-    //printf("sys_filesize: retrieved file descriptor: %d\n", file_desc->fd_num);
-    returnval = file_length(file_desc->file_struct);
-  }
-  lock_release(&filesys_lock);
-  return returnval;
-}
 
 /* Reads size bytes from the file open as fd into buffer. Returns the number of bytes actually read (0 at end of file), or -1 if the file could not be read (due to a condition other than end of file). Fd 0 reads from the keyboard using input_getc(). */ 
 int syscall_read(int fd, void * buffer, unsigned size){
@@ -495,13 +505,19 @@ void syscall_close(int fd){
 
 // simple check to see if the pointer is safe to use
 // probably needs more later, but good for now
-bool is_ptr_valid(const void *user_ptr)
+bool is_valid_ptr(const void *user_ptr)
 {
-  if(user_ptr == NULL){
-    printf("Pointer is INVALID\n");
-		return false;
+  struct thread *curr = thread_current();
+  if(user_ptr != NULL && is_user_vaddr(user_ptr))
+  {
+    return (pagedir_get_page(curr->pagedir, user_ptr)) != NULL;
   }
-  return true;
+  if(user_ptr == NULL){
+    //printf("Pointer is NULL\n");
+  }else{
+    //printf("Pointer is not user address space\n");
+  }
+  return false;
 }
 
 
