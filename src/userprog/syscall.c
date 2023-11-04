@@ -1,25 +1,29 @@
-#include "userprog/syscall.h"
-#include "userprog/syscall.h"
-#include "userprog/process.h"
-#include <stdio.h>
-#include <syscall-nr.h>
-#include <string.h>
 #include "devices/shutdown.h"
 #include "devices/input.h"
+#include "userprog/syscall.h"
+#include "userprog/process.h"
 #include "filesys/filesys.h"
 #include "filesys/file.h"
 #include "filesys/inode.h"
 #include "filesys/directory.h"
 #include "threads/palloc.h"
 #include "threads/malloc.h"
+#include <stdio.h>
+#include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "threads/synch.h"
-#include "threads/init.h"
-#include "threads/thread.h"
 #include "lib/kernel/list.h"
 #include "lib/user/syscall.h"
+#include "userprog/pagedir.h"
+#include "userprog/process.h"
+#include "threads/malloc.h"
+#include <string.h>
+#include "threads/synch.h"
+#include "filesys/file.h"
+#include "filesys/filesys.h"
+#include "devices/shutdown.h"
 static void syscall_handler (struct intr_frame *);
 bool is_valid_ptr(const void *user_ptr);
 struct lock filesys_lock;
@@ -36,13 +40,14 @@ struct file_descriptor * retrieve_file(int fd);
 void
 syscall_init (void) 
 {
+  lock_init(&filesys_lock);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
 static void
 syscall_handler (struct intr_frame *f) 
 {
-  printf ("system call!\n");
+  //printf ("system call!\n");
   uint32_t *esp;
 
   // The system call number is in the 32-bit word at the caller's stack pointer.
@@ -55,13 +60,13 @@ syscall_handler (struct intr_frame *f)
 	switch(*esp){
 		case SYS_HALT:
 		{
-			printf("SYSCALL: SYS_HALT \n");
+			//printf("SYSCALL: SYS_HALT \n");
 			syscall_halt();
 			break;
 		}
 		case SYS_EXIT:
 		{
-			printf("SYSCALL: SYS_EXIT \n");
+			//printf("SYSCALL: SYS_EXIT \n");
       if(!is_valid_ptr((const void *)(esp + 1)))
         syscall_exit(-1);
       syscall_exit((int)*(esp+1));
@@ -85,7 +90,7 @@ syscall_handler (struct intr_frame *f)
 		case SYS_WAIT:
 		{
 			if(is_valid_ptr((const void*) (esp+1))){
-        f->eax = process_wait(*(esp + 1));//
+        f->eax = process_wait(*(esp + 1));
       }else{
         syscall_exit(-1);
       }
@@ -217,7 +222,7 @@ syscall_handler (struct intr_frame *f)
 		}
 		default:
 		{
-			printf("SYSCALL NOT RECOGNIZED/NOT CREATED YET\n");
+			//printf("SYSCALL NOT RECOGNIZED/NOT CREATED YET\n");
 			syscall_exit(-1);
     	break;
 		}
@@ -320,7 +325,7 @@ int syscall_exec(const char *cmdline){
   // f will be null if file not found in file system
   if (f == NULL){
     // nothing to do here exec fails, release lock and return -1
-    printf("SYSCALL: sys_exec: filesys_open failed\n");
+    //printf("SYSCALL: sys_exec: filesys_open failed\n");
     lock_release(&filesys_lock);
     return (pid_t)-1;
   } else {
@@ -332,14 +337,14 @@ int syscall_exec(const char *cmdline){
     thread_current()->child_load = 0;
     thread_id = process_execute(cmdline);
     lock_acquire(&thread_current()->child_lock);
-    printf("SYSCALL: sys_exec: waiting until child_load != 0\n");
+    //printf("SYSCALL: sys_exec: waiting until child_load != 0\n");
     while(thread_current()->child_load == 0)
       cond_wait(&thread_current()->child_condition, &thread_current()->child_lock);
-    printf("SYSCALL: sys_exec: child_load != 0\n");
+    //printf("SYSCALL: sys_exec: child_load != 0\n");
     if(thread_current()->child_load == -1) // load failed no process id to return
      {
        thread_id = -1;
-       printf("SYSCALL: sys_exec: child_load failed\n");
+       //printf("SYSCALL: sys_exec: child_load failed\n");
      }
     lock_release(&thread_current()->child_lock);
     return thread_id;
