@@ -13,7 +13,6 @@ static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
 
 /* Exit with status (-1) for an invalid address */
-//static void exit(int);
 
 /* Registers handlers for interrupts that can be caused by user
    programs.
