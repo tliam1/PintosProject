@@ -151,9 +151,6 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-  /* Exit the process if invalid pointer */
-  // if(!is_valid_ptr(fault_addr))
-  //   exit(-1);
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
