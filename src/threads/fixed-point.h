@@ -1,19 +1,21 @@
-/* Notes from PINTOS Doc:
+/* 
 Unfortunately, Pintos does not support floating-point arithmetic
 in the kernel, This means that calculations on real quantities must
 be simulated using integers. The fundamental idea is to treat the rightmost
 bits of an integer as representing a Fraction.
 
-Let x and y be fixed-point numbers, and let n be an integer.
-Then the sum of x and y is x + y
-and their difference is x - y.
-The sum of x and n is x + n * f;
-difference, x - n * f;
-product, x * n;
-quotient, x / n.
-
-Multiplying two fixed-point values x and y: ((int64_t) x) * y / f.
-Dividing two fixed-point values x and y: ((int64_t) x) * f / y.
+Convert n to fixed point:	n * f
+Convert x to integer (rounding toward zero):	x / f
+Convert x to integer (rounding to nearest):	(x + f / 2) / f if x >= 0,
+(x - f / 2) / f if x <= 0.
+Add x and y:	x + y
+Subtract y from x:	x - y
+Add x and n:	x + n * f
+Subtract n from x:	x - n * f
+Multiply x by y:	((int64_t) x) * y / f
+Multiply x by n:	x * n
+Divide x by y:	((int64_t) x) * f / y
+Divide x by n:	x / n
 */
 
 #ifndef THREADS_FIXED_POINT_H
